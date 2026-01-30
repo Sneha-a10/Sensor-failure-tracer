@@ -61,71 +61,54 @@ Everything else (explanations, actions, learning) is built **on top of the trace
 ```mermaid
 flowchart TD
 
-%% =========================
 %% Sensor & Data Reality Layer
-%% =========================
-subgraph L1[Sensor & Data Reality Layer]
-    S1[Sensor 1<br/>Vibration Sensor]
-    S2[Sensor 2<br/>Temperature Sensor]
-    S3[Sensor 3<br/>Load Sensor]
-
-    SD[Sensor Data Stream<br/>Time-Series Data]
+subgraph L1["Sensor & Data Reality Layer"]
+    S1["Sensor 1: Vibration"]
+    S2["Sensor 2: Temperature"]
+    S3["Sensor 3: Load"]
+    SD["Sensor Data Stream"]
     S1 --> SD
     S2 --> SD
     S3 --> SD
 end
 
-%% =========================
 %% Reasoning Engine
-%% =========================
-subgraph L2[Reasoning Engine]
-    FE[Feature Extraction<br/>• Vibration trend<br/>• Temp delta<br/>• Load stability]
-    RL[Deterministic Reasoning<br/>• Rule evaluation<br/>• Threshold checks]
-
-    FE --> RL
+subgraph L2["Reasoning Engine"]
+    FE["Feature Extraction"]
+    RE["Deterministic Reasoning"]
+    FE --> RE
 end
 
-%% =========================
 %% Decision Trace Engine
-%% =========================
-subgraph L3[Decision Trace Engine]
-    DT[Decision Trace Builder<br/>• Rules triggered<br/>• Intermediate risks]
-    JS[Trace Storage<br/>JSON Decision Trace]
-    FD[Final Decision<br/>Decision + Confidence]
-
+subgraph L3["Decision Trace Engine"]
+    DT["Decision Trace Builder"]
+    FD["Final Decision and Confidence"]
+    JS["Decision Trace Stored as JSON"]
     DT --> FD
     DT --> JS
 end
 
-%% =========================
-%% Explainability Agent
-%% =========================
-subgraph L4[Explainability & Agentic Layer]
-    TI[Trace Ingestion<br/>Reads Decision Trace]
-    LLM[Explainability Agent (LLM)<br/>Trace → Text]
-    EX[Human-Readable Explanation<br/>Why decision happened]
-
+%% Explainability Layer
+subgraph L4["Explainability Agent Layer"]
+    TI["Trace Ingestion"]
+    LLM["Explainability LLM"]
+    EX["Human Readable Explanation"]
     TI --> LLM
     LLM --> EX
 end
 
-%% =========================
-%% Maintenance Agent & Workflow
-%% =========================
-subgraph L5[Maintenance Agent & Workflow Layer]
-    MA[Maintenance Decision Agent<br/>• Inspect<br/>• Schedule<br/>• Monitor]
-    WO[Work Order Generator<br/>Priority + Action]
-    FB[Engineer Feedback<br/>Confirm / Reject]
+%% Maintenance & Workflow Layer
+subgraph L5["Maintenance Agent and Workflow"]
+    MA["Maintenance Decision Agent"]
+    WO["Work Order Generator"]
+    FB["Engineer Feedback"]
 end
 
-%% =========================
-%% Connections Between Layers
-%% =========================
+%% Cross Layer Flow
 SD --> FE
-RL --> DT
+RE --> DT
 FD --> TI
 EX --> MA
 MA --> WO
 WO --> FB
 FB --> DT
-
