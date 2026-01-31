@@ -357,5 +357,90 @@
             "reference": "Bearing_Maintenance_Manual.pdf, Section 4.2"
         },
         "output_explanation": "The bearing maintenance manual recommends that you inspect the bearing for visible wear. You should check the lubrication condition and schedule replacement within 5\u201310 days if the degradation persists. You should also ensure that the machine is powered down before inspection."
+    },
+    {
+        "timestamp": "2026-01-31T11:05:48.147932",
+        "input_trace": {
+            "rules_triggered": [
+                "PUMP_VIBRATION_CRITICAL"
+            ],
+            "final_confidence": 0.85,
+            "reasoning_trace": [
+                {
+                    "rule": "PUMP_VIBRATION_CRITICAL",
+                    "feature": "vibration_rms",
+                    "comparison": ">",
+                    "threshold": 4.0,
+                    "feature_value": 4.5,
+                    "confidence_delta": 0.35
+                }
+            ],
+            "decision": "HIGH_VIBRATION_ALERT",
+            "observed_behavior": "Excessive noise",
+            "expected_behavior": "Quiet operation"
+        },
+        "output_explanation": "The machine is experiencing excessive noise and vibration."
+    },
+    {
+        "timestamp": "2026-01-31T11:07:32.413580",
+        "input_trace": {
+            "rules_triggered": [
+                "PUMP_VIBRATION_CRITICAL"
+            ],
+            "final_confidence": 0.85,
+            "reasoning_trace": [
+                {
+                    "rule": "PUMP_VIBRATION_CRITICAL",
+                    "feature": "vibration_rms",
+                    "comparison": ">",
+                    "threshold": 4.0,
+                    "feature_value": 4.5,
+                    "confidence_delta": 0.35
+                }
+            ],
+            "decision": "HIGH_VIBRATION_ALERT",
+            "observed_behavior": "Excessive noise",
+            "expected_behavior": "Quiet operation"
+        },
+        "output_explanation": "Observed Excessive noise instead of Quiet operation."
+    },
+    {
+        "timestamp": "2026-01-31T11:10:15.271592",
+        "input_trace": {
+            "recommended_action": [
+                "Address EARLY_BEARING_DEGRADATION: Check lubrication levels immediately.",
+                "Schedule bearing replacement within 5\u201310 days if symptoms persist.",
+                "Monitor rapid temperature spike and vibration trends closely."
+            ],
+            "safety_note": "Before inspecting equipment, ensure power is isolated and lock-out/tag-out procedures are followed.",
+            "reference": "Internal Knowledge Base"
+        },
+        "output_explanation": "Explicitly state the observed readings and compare them to the thresholds. Describe the implications of these readings on machine health. Explain the implications of these readings on machine health. Report Explicitly state the observed readings and compare them to the thresholds. Describe the implications of these readings on machine health."
+    },
+    {
+        "timestamp": "2026-01-31T11:12:08.107674",
+        "input_trace": {
+            "recommended_action": [
+                "Address EARLY_BEARING_DEGRADATION: Check lubrication levels immediately.",
+                "Schedule bearing replacement within 5\u201310 days if symptoms persist.",
+                "Monitor rapid temperature spike and vibration trends closely."
+            ],
+            "safety_note": "Before inspecting equipment, ensure power is isolated and lock-out/tag-out procedures are followed.",
+            "reference": "Internal Knowledge Base"
+        },
+        "output_explanation": "Immediately address bearing degradation."
+    },
+    {
+        "timestamp": "2026-01-31T11:13:22.387894",
+        "input_trace": {
+            "recommended_action": [
+                "Address EARLY_BEARING_DEGRADATION: Check lubrication levels immediately.",
+                "Schedule bearing replacement within 5\u201310 days if symptoms persist.",
+                "Monitor rapid temperature spike and vibration trends closely."
+            ],
+            "safety_note": "Before inspecting equipment, ensure power is isolated and lock-out/tag-out procedures are followed.",
+            "reference": "Internal Knowledge Base"
+        },
+        "output_explanation": "The recommended action is to address EARLY_BEARING_DEGRADATION: Check lubrication levels immediately., Schedule bearing replacement within 5\u201310 days if symptoms persist., Monitor rapid temperature spike and vibration trends closely., Before inspecting equipment, ensure power is isolated and lock-out/tag-out procedures are followed."
     }
 ]

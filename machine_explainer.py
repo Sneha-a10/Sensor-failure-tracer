@@ -8,21 +8,6 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 MODEL_NAME = "google/flan-t5-large"
 LOG_FILE = "interaction_logs.json"
 
-SEVERITY_MAP = [
-    (0.0, "low"),
-    (0.4, "moderate"),
-    (0.7, "high"),
-    (0.9, "critical")
-]
-
-# Optional: Map technical codes to human-readable text if needed
-DECISION_INTERPRETATIONS = {
-    "EARLY_BEARING_DEGRADATION": "internal mechanical wear in rotating components",
-    "OVERHEATING": "abnormal thermal behavior",
-    "MISALIGNMENT": "shaft or coupling misalignment",
-    "LUBRICATION_ISSUE": "insufficient or degraded lubrication"
-}
-
 class MachineExplainer:
     def __init__(self, model_name=MODEL_NAME):
         print(f"Loading model: {model_name}...")
@@ -34,33 +19,39 @@ class MachineExplainer:
         self.model.to(self.device)
         print(f"Model loaded on {self.device}.")
 
-    def _score_to_level(self, score):
-        for threshold, label in reversed(SEVERITY_MAP):
-            if score >= threshold:
-                return label
-        return "low"
-
-    def _score_to_percentage(self, score):
-        return int(score * 100)
-
     def _humanize_decision_trace(self, trace):
-        # GENERALIZED LOGIC:
-        # Convert any input dictionary into a flat list of text observations.
         observations = []
         
-        # 1. Handle Lists (like 'recommended_action')
-        for key, value in trace.items():
-            formatted_key = key.replace("_", " ").capitalize()
-            
-            if isinstance(value, list):
-                if value:
-                    items = ", ".join(str(v) for v in value)
-                    observations.append(f"{formatted_key}: {items}")
-            elif isinstance(value, (str, int, float, bool)):
-                observations.append(f"{formatted_key}: {value}")
-            elif isinstance(value, dict):
-                 # Flatten nested dicts simply for now
-                 observations.append(f"{formatted_key}: {str(value)}")
+        # 1. Handle REASONING TRACE (Specific Rules Schema)
+        if "reasoning_trace" in trace:
+            for step in trace["reasoning_trace"]:
+                feature = step.get("feature", "Unknown Feature").replace("_", " ").capitalize()
+                val = step.get("feature_value", 0)
+                threshold = step.get("threshold", "N/A")
+                comparison = step.get("comparison", "vs")
+                
+                observations.append(f"{feature}: {val} (Threshold: {comparison} {threshold})")
+                
+            # Add observed vs expected if available
+            if "observed_behavior" in trace and "expected_behavior" in trace:
+                observations.append(f"Behavior: Observed {trace['observed_behavior']} instead of {trace['expected_behavior']}")
+
+        # 2. Handle Generic/Other Inputs (Fallback)
+        else:
+            for key, value in trace.items():
+                if key in ["reasoning_trace", "rules_triggered", "final_confidence"]: 
+                    continue # Skip redundant keys if mixed
+                    
+                formatted_key = key.replace("_", " ").capitalize()
+                
+                if isinstance(value, list):
+                    if value:
+                        items = ", ".join(str(v) for v in value)
+                        observations.append(f"{formatted_key}: {items}")
+                elif isinstance(value, (str, int, float, bool)):
+                    observations.append(f"{formatted_key}: {value}")
+                elif isinstance(value, dict):
+                     observations.append(f"{formatted_key}: {str(value)}")
 
         return {
             "observations": observations
@@ -75,21 +66,22 @@ class MachineExplainer:
 Data:
 {data_text}
 
-Task: Rewrite ALL the data below into a single, comprehensive imperative paragraph. 
-- You MUST include every recommendation and safety note provided.
-- Start directly with action verbs (e.g., "Inspect...", "Ensure...").
-- List each specific action required.
+Task: Rewrite the provided recommendations below into a single, cohesive professional paragraph.
+- You MUST include ALL specific actions, timeframes (e.g., 5-10 days), and safety notes.
+- Do NOT summarize or shorten. 
+- Connect the points fluently.
 
-Instructions:
+Recommendations:
 """
         inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True).to(self.device)
 
         outputs = self.model.generate(
             **inputs,
-            max_length=200,
+            max_length=300,
+            min_length=60,
             do_sample=True,
             temperature=0.3, 
-            top_p=0.95,
+            top_p=0.92,
             repetition_penalty=1.2,
             early_stopping=True
         )

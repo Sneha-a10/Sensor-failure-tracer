@@ -1,11 +1,11 @@
 [
     {
         "recommended_action": [
-            "Inspect bearing for visible wear",
-            "Check lubrication condition",
-            "Schedule replacement within 5–10 days if degradation persists"
+            "Address EARLY_BEARING_DEGRADATION: Check lubrication levels immediately.",
+            "Schedule bearing replacement within 5\u201310 days if symptoms persist.",
+            "Monitor rapid temperature spike and vibration trends closely."
         ],
-        "safety_note": "Ensure machine is powered down before inspection",
-        "reference": "Bearing_Maintenance_Manual.pdf, Section 4.2"
+        "safety_note": "Before inspecting equipment, ensure power is isolated and lock-out/tag-out procedures are followed.",
+        "reference": "Internal Knowledge Base"
     }
 ]
