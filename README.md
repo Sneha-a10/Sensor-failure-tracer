@@ -36,9 +36,6 @@ graph TD
     E{"Decision Engine"}
     style E fill:#fdd,stroke:#333,stroke-width:2px
 
-    F["Groq API<br>(Llama-3.3-70b)"]
-    style F fill:#eef,stroke:#333,stroke-width:2px
-
     G["Fallback Logic<br>(Simulated)"]
     style G fill:#eee,stroke:#333,stroke-width:2px
 
@@ -51,9 +48,7 @@ graph TD
     C -->|3. API Call| D
     D -->|4. Return Context/Manuals| B
     B -->|5. Combine Alert + Context| E
-    E -->|With LLM| F
     E -->|Without LLM| G
-    F -->|6. Generate Natural Language| H
     G -->|6. Generate Structured JSON| H
 ```
 
