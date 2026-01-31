@@ -50,8 +50,8 @@ graph TD
     C -->|3. API Call| D
     D -->|4. Return Context/Manuals| B
     B -->|5. Combine Alert + Context| E
-    E -->|If GROQ_API_KEY exists| F
-    E -->|If No Key| G
+    E -->|With LLM| F
+    E -->|Without LLM| G
     F -->|6. Generate Natural Language| H
     G -->|6. Generate Structured JSON| H
 ```
