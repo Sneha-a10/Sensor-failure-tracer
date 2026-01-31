@@ -1,6 +1,8 @@
 import streamlit as st
 import sys
 import os
+import subprocess
+import json
 
 # -------------------------------------------------
 # Make trace-engine importable
@@ -48,11 +50,29 @@ st.markdown("""
         border: 1px solid #30363d;
     }
     
+    .feature-key { color: #d2a8ff; font-weight: 500; }
+    .feature-val { color: #f0f6fc; font-weight: 700; font-family: monospace; }
+    
+    /* Run Simulation Button - Teal with White Border */
+    .stButton:has(+ div .run-marker) button {
+        background-color: #009688 !important;
+        border: 1.5px solid #ffffff !important;
+        color: white !important;
+    }
+    .stButton:has(+ div .run-marker) button:hover,
+    .stButton:has(+ div .run-marker) button:active,
+    .stButton:has(+ div .run-marker) button:focus {
+        background-color: #00bfa5 !important;
+        border-color: #ffffff !important;
+        color: white !important;
+        box-shadow: 0 0 10px rgba(0, 150, 136, 0.4) !important;
+    }
+    
     /* 3. Status Banner (Red Strip) */
     .status-banner {
         width: 100%;
         padding: 1rem 2rem;
-        margin-top: 1rem;
+        margin-top: 0;
         margin-bottom: 2rem;
         display: flex;
         justify-content: space-between;
@@ -100,7 +120,7 @@ st.markdown("""
         border-bottom: 1px solid #21262d;
         font-size: 0.95rem;
     }
-    .feature-key { color: #58a6ff; font-weight: 500; }
+    .feature-key { color: #d2a8ff; font-weight: 700; }
     .feature-val { color: #f0f6fc; font-weight: 700; font-family: monospace; }
     
     /* 4b. Right Panel: Trace Steps */
@@ -178,6 +198,21 @@ st.markdown("""
         font-family: sans-serif;
         font-weight: 600;
     }
+    
+    /* Bounding Box Style */
+    .content-box {
+        background-color: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 1.25rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    .content-box-header {
+        margin-bottom: 1rem;
+        border-bottom: 1px solid #30363d;
+        padding-bottom: 0.5rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -185,27 +220,192 @@ st.markdown("""
 # -------------------------------------------------
 # State Management
 # -------------------------------------------------
+def export_trace_to_llm(trace):
+    """Saves the current trace to the mt-llm knowledge base for processing."""
+    llm_input_path = os.path.join(PROJECT_ROOT, "..", "mt-llm", "knowledge_base", "post_decision_trace.json")
+    try:
+        os.makedirs(os.path.dirname(llm_input_path), exist_ok=True)
+        # Wrap in expected format
+        data = {"input_trace": trace}
+        with open(llm_input_path, "w") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        st.error(f"Failed to export trace: {e}")
+
 if "simulation_results" not in st.session_state:
     st.session_state.simulation_results = []
     
 if "active_event_idx" not in st.session_state:
     st.session_state.active_event_idx = 0
+    st.session_state.last_exported_idx = -1 # Track export state
+
+if "ai_analysis_cache" not in st.session_state:
+    st.session_state.ai_analysis_cache = {} # Cache idx -> results
+
+if "ai_feedback_state" not in st.session_state:
+    st.session_state.ai_feedback_state = {} # Cache idx -> "Accepted" | "Rejected"
+
+def handle_ai_feedback(idx, status):
+    """Processes user feedback (Accept/Reject) for a specific AI advisory."""
+    st.session_state.ai_feedback_state[idx] = status
+    
+    if status == "Accepted":
+        # Run the KB update script in the background
+        base_path = os.path.join(PROJECT_ROOT, "..", "mt-llm")
+        kb_update_script = os.path.join(base_path, "pipeline_logic", "machine_explainer.py")
+        env = os.environ.copy()
+        env["ACTION"] = "UPDATE_KB"
+        env["NON_INTERACTIVE"] = "1"
+        try:
+            subprocess.run([sys.executable, kb_update_script], cwd=base_path, env=env, capture_output=True)
+        except:
+            pass
+
+def run_ai_pipeline():
+    """Runs the mt-llm pipeline scripts and returns the result."""
+    env = os.environ.copy()
+    env["NON_INTERACTIVE"] = "1"
+    
+    # Resolve correct Python interpreter
+    python_exe = sys.executable
+    venv_python = os.path.join(PROJECT_ROOT, "..", ".venv", "Scripts", "python.exe")
+    if os.path.exists(venv_python):
+        python_exe = venv_python
+
+    base_path = os.path.join(PROJECT_ROOT, "..", "mt-llm")
+    input_trace = os.path.join(base_path, "knowledge_base", "post_decision_trace.json")
+    rag_script = os.path.join(base_path, "pipeline_logic", "process_alert_workflow.py")
+    exp_script = os.path.join(base_path, "pipeline_logic", "machine_explainer.py")
+    
+    if not os.path.exists(input_trace):
+        return {"error": f"Input trace missing at {input_trace}"}
+
+    try:
+        # 1. Run RAG Workflow
+        rag_res = subprocess.run([python_exe, rag_script], cwd=base_path, env=env, capture_output=True, text=True)
+        if rag_res.returncode != 0:
+            return {"error": f"RAG Stage Failed: {rag_res.stderr}"}
+            
+        # 2. Run Machine Explainer
+        exp_res = subprocess.run([python_exe, exp_script], cwd=base_path, env=env, capture_output=True, text=True)
+        if exp_res.returncode != 0:
+            return {"error": f"Explainer Stage Failed: {exp_res.stderr}"}
+        
+        # 3. Load Results
+        rec_path = os.path.join(base_path, "final_recommendation.json")
+        exp_path = os.path.join(base_path, "ai_explanation.json")
+        
+        recs = {}
+        if os.path.exists(rec_path):
+            with open(rec_path, 'r') as f: recs = json.load(f)
+        
+        expl = {}
+        if os.path.exists(exp_path):
+            with open(exp_path, 'r') as f: expl = json.load(f)
+            
+        return {**recs, **expl}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # -------------------------------------------------
 # UI Components
 # -------------------------------------------------
 def render_header():
-    c1, c2 = st.columns([3, 1])
-    with c1:
-        st.markdown("## 📊 Industrial Trace Engine Desktop Dashboard")
-    with c2:
-        # 2. TOP BAR - Run Button (Always enabled)
-        if st.button("▶ Run Simulation", use_container_width=True):
-            with st.spinner("Loading..."):
-                st.session_state.simulation_results = run_live_simulation()
-            st.session_state.active_event_idx = 0 # Reset to first event
+    # Centered, UPPERCASE Header
+    st.markdown("""
+    <div style="text-align: center; padding: 1rem 0 2rem 0;">
+        <h1 style="
+            text-transform: uppercase; 
+            font-size: 2.2rem; 
+            font-weight: 800; 
+            letter-spacing: 2px;
+            color: #e6edf3;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        ">
+            <span style="margin-right: 16px;">📊</span> Industrial Trace Engine Desktop Dashboard
+        </h1>
+    </div>
+    """, unsafe_allow_html=True)
+
+def render_llm_panel(trace):
+    idx = st.session_state.active_event_idx
+    cache = st.session_state.ai_analysis_cache
+    feedback = st.session_state.ai_feedback_state
+    
+    if idx not in cache:
+        # Automatic trigger with status message
+        with st.status("🧠 Analyzing decision trace and manuals...", expanded=True) as status:
+            results = run_ai_pipeline()
+            st.session_state.ai_analysis_cache[idx] = results
+            status.update(label="✅ Advisory Generated", state="complete", expanded=False)
             st.rerun()
+    else:
+        # Show results
+        res = cache[idx]
+        if "error" in res:
+            st.error(f"AI Pipeline Error: {res['error']}")
+            return
+
+        explanation = res.get("explanation", "No explanation generated.")
+        recs = res.get("recommended_action", [])
+        safety = res.get("safety_note", "No safety note provided.")
+        ref = res.get("reference", "Internal Knowledge Base")
+
+        # Consolidate HTML for absolute structure (Remove indentation to avoid MD code blocks)
+        html = f"""<div class="content-box">
+<div class="panel-header content-box-header">
+<span class="panel-icon">🤖</span> AI ANALYSIS & ADVISORY
+</div>
+<div style="margin-bottom: 1.5rem;">
+<div style="color: #d2a8ff; font-weight: 700; font-size: 0.85rem; text-transform: uppercase; margin-bottom: 8px;">AI Narrative</div>
+<div style="color: #e6edf3; font-style: italic; line-height: 1.5; background: rgba(210, 168, 255, 0.05); padding: 1rem; border-radius: 6px; border-left: 3px solid #d2a8ff;">
+"{explanation}"
+</div>
+</div>
+<div style="margin-bottom: 1.5rem;">
+<div style="color: #3fb950; font-weight: 700; font-size: 0.85rem; text-transform: uppercase; margin-bottom: 8px;">Recommended Actions</div>
+<div style="color: #f0f6fc; font-size: 0.9rem;">"""
+        for r in recs:
+            html += f'<div style="margin-bottom: 6px; display: flex;"><span style="color: #3fb950; margin-right: 8px;">•</span> {r}</div>'
+        
+        html += f"""</div>
+</div>
+<div style="padding: 10px; background: rgba(218, 54, 51, 0.1); border: 1px solid #da3633; border-radius: 6px; margin-bottom: 0.5rem;">
+<div style="color: #ff7b72; font-weight: bold; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 4px;">⚠ Safety Note</div>
+<div style="color: #f0f6fc; font-size: 0.85rem;">{safety}</div>
+</div>
+<div style="color: #8b949e; font-size: 0.75rem; display: flex; justify-content: space-between; padding-top: 1rem; border-top: 1px solid #30363d; margin-top: 1rem;">
+<span>Source: {ref}</span>
+<span>Powered by FLAN-T5-Small</span>
+</div>
+</div>"""
+        st.markdown(html, unsafe_allow_html=True)
+        
+        # Feedback Buttons Row - ONLY if NOT NORMAL
+        decision = trace.get("decision", "NORMAL")
+        if decision != "NORMAL":
+            if idx not in feedback:
+                st.markdown('<div style="margin-top: 1rem;"></div>', unsafe_allow_html=True)
+                f_col1, f_col2 = st.columns(2)
+                with f_col1:
+                    if st.button("✅ ACCEPT", key=f"acc_{idx}", use_container_width=True):
+                        handle_ai_feedback(idx, "Accepted")
+                        st.rerun()
+                with f_col2:
+                    if st.button("❌ REJECT", key=f"rej_{idx}", use_container_width=True):
+                        handle_ai_feedback(idx, "Rejected")
+                        st.rerun()
+            else:
+                status_color = "#3fb950" if feedback[idx] == "Accepted" else "#da3633"
+                st.markdown(f"""
+                    <div style="text-align: center; color: {status_color}; font-weight: bold; padding: 0.5rem; border: 1px solid {status_color}; border-radius: 4px; margin-top: 1rem;">
+                        Feedback Recorded: {feedback[idx]}
+                    </div>
+                """, unsafe_allow_html=True)
 
 def render_status_banner(trace, component):
     decision = trace.get("decision", "UNKNOWN")
@@ -232,35 +432,38 @@ def render_status_banner(trace, component):
     """, unsafe_allow_html=True)
 
 def render_features_panel(result):
-    # HEADER
-    st.markdown("""
-    <div class="panel-header">
-        <span class="panel-icon">💾</span> EXTRACTED FEATURES
-    </div>
-    """, unsafe_allow_html=True)
+    # Construct FULL HTML string including the bounding box
+    html = '<div class="content-box">'
     
-    # LIST CONTENT
-    # Strict single-line construction to avoid Markdown code blocks
-    html_content = '<div class="feature-list">'
+    # Internal Header
+    html += """
+    <div class="panel-header content-box-header">
+        <span class="panel-icon">📡</span> EXTRACTED FEATURES
+    </div>
+    """
+    
+    # Content
+    html += '<div class="feature-list">'
     features = result["features"]
     for k, v in features.items():
-        # Build each item as a single line string
-        html_content += f'<div class="feature-item"><span class="feature-key">{k}</span><span class="feature-val">{v}</span></div>'
-    html_content += '</div>'
+        html += f'<div class="feature-item"><span class="feature-key">{k}</span><span class="feature-val">{v}</span></div>'
+    html += '</div></div>' # Close content and box
     
-    st.markdown(html_content, unsafe_allow_html=True)
+    st.markdown(html, unsafe_allow_html=True)
 
 def render_trace_panel(trace):
-    # HEADER
-    st.markdown("""
-    <div class="panel-header">
+    # Start Box
+    full_html = '<div class="content-box">'
+    
+    # Header
+    full_html += """
+    <div class="panel-header content-box-header">
         <span class="panel-icon">🔗</span> DECISION TRACE & REASONING
     </div>
-    """, unsafe_allow_html=True)
+    """
     
-    # STEPS - Iterative rendering
+    # Steps
     reasoning = trace.get("reasoning_trace", [])
-    
     for i, step in enumerate(reasoning, 1):
         rule = step.get("rule", "UNKNOWN")
         feature_name = step.get("feature", "unknown_sensor")
@@ -274,24 +477,15 @@ def render_trace_panel(trace):
         res_class = "res-fired" if res == "FIRED" else "res-pass"
         val_style = "val-highlight" if res == "FIRED" else ""
         
-        # Build HTML as a single concatenated string to avoid indentation issues
         step_html = f'<div class="trace-step">'
         step_html += f'<div class="trace-step-header"><span class="step-circle">{i}</span><span class="node-name">NODE: {rule}</span></div>'
         step_html += f'<div class="logic-box"><span style="font-size: 0.8em; color: #8b949e; margin-right: 8px;">[SENSOR: {feature_name}]</span> Value: <span class="{val_style}">{val}</span> {comp} Threshold: {thresh}</div>'
         step_html += f'<div style="margin-top: 8px; display: flex; align-items: center;"><span class="result-badge {res_class}">RESULT: {res}</span><span style="font-size: 0.8rem; color: #8b949e;">Condition: {cond_text}</span></div>'
         step_html += '</div>'
+        full_html += step_html
         
-        st.markdown(step_html, unsafe_allow_html=True)
-        
-    # Action Trigger (Final Step)
-    if trace.get("decision") == "DANGER":
-        final_html = '<div class="trace-step" style="border: 1px solid #1f6feb; background: rgba(31, 111, 235, 0.1);">'
-        final_html += '<div class="trace-step-header"><span class="step-circle" style="background:#1f6feb;">!</span><span class="node-name" style="color: #58a6ff;">LOGIC: CONJUNCTIVE_TRIGGER(FINAL)</span></div>'
-        final_html += '<h4 style="margin: 0; color: #f0f6fc;">⚡ ACTION: TRIGGER_DANGER_SEQUENCE</h4>'
-        final_html += '<p style="margin: 4px 0 0 0; font-size: 0.8rem; color: #8b949e;">Critical thresholds breached. Automatic emergency shutdown protocol recommended.</p>'
-        final_html += '</div>'
-        
-        st.markdown(final_html, unsafe_allow_html=True)
+    full_html += '</div>' # Close Box
+    st.markdown(full_html, unsafe_allow_html=True)
 
 
 # -------------------------------------------------
@@ -299,88 +493,96 @@ def render_trace_panel(trace):
 # -------------------------------------------------
 render_header()
 
-if st.session_state.simulation_results:
-    results = st.session_state.simulation_results
-    
+# Initialize results variable safe-guarded
+results = st.session_state.simulation_results
+
+# 2. CONTROLS (Events Left, Run Right) - ALWAYS RENDERED
+st.markdown("---")
+col_controls, col_run = st.columns([3, 1])
+
+with col_controls:
+    if results:
+        # Event Buttons - Aligned horizontally
+        cols = st.columns(3)
+        def set_tab(idx): st.session_state.active_event_idx = idx
+        
+        for i in range(3):
+            if i < len(results):
+                label = f"Event {i+1}"
+                is_active = (i == st.session_state.active_event_idx)
+                if cols[i].button(label, key=f"tab_{i}", type="primary" if is_active else "secondary", use_container_width=True):
+                    set_tab(i)
+                    # Export the clicked trace
+                    export_trace_to_llm(results[i]["trace"])
+                    st.rerun()
+            else:
+                cols[i].button(f"Event {i+1}", disabled=True, key=f"tab_disable_{i}", use_container_width=True)
+
+with col_run:
+     # No container, button first for perfect alignment
+     if st.button("▶ Run Simulation", type="primary", use_container_width=True):
+        with st.spinner("Loading..."):
+            st.session_state.simulation_results = run_live_simulation()
+            # Export the first trace immediately
+            if st.session_state.simulation_results:
+                export_trace_to_llm(st.session_state.simulation_results[0]["trace"])
+        st.session_state.active_event_idx = 0
+        st.rerun()
+     # Marker after button to anchor CSS strictly to this column
+     st.markdown('<div class="run-marker"></div>', unsafe_allow_html=True)
+
+# 3. CONTENT (Only if results exist)
+if results:
     # Validation of index
     if st.session_state.active_event_idx >= len(results):
         st.session_state.active_event_idx = 0
         
     active_res = results[st.session_state.active_event_idx]
     active_trace = active_res["trace"]
-    
-    # 4. Main Columns
-    col_left, col_right = st.columns([1, 1.5]) # Adjusted ratio for better balance
-    
-    # --- LEFT COLUMN: Navigation & Status & Features ---
-    with col_left:
-        # A. EVENT TABS (Custom Buttons)
-        # Use columns to make them full width together
-        t_cols = st.columns(3, gap="small")
-        
-        def set_tab(idx):
-             st.session_state.active_event_idx = idx
-        
-        for i in range(3):
-            if i < len(results):
-                label = f"Event {i+1}"
-                is_active = (i == st.session_state.active_event_idx)
-                # Tab styling
-                if t_cols[i].button(
-                    label, 
-                    key=f"tab_{i}", 
-                    type="primary" if is_active else "secondary", 
-                    use_container_width=True
-                ):
-                    set_tab(i)
-                    st.rerun()
-            else:
-                t_cols[i].button(f"Event {i+1}", disabled=True, key=f"tab_disable_{i}", use_container_width=True)
-        
-        st.markdown("<div style='margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
+    # --- PROCEED WITH LAYOUT ---
 
-        # B. STATUS BANNER (Under Tabs)
+    # 3. STATUS BANNER (Full Width)
+    # We use a container to span width
+    with st.container():
+        st.markdown('<div style="margin-top: 1rem;"></div>', unsafe_allow_html=True) # Spacer
         render_status_banner(active_trace, active_res["component"])
-        
-        # C. FEATURES PANEL
+        st.markdown('<div style="margin-bottom: 2rem;"></div>', unsafe_allow_html=True) # Spacer
+
+    # 4. CONTENT GRID (2 Columns)
+    grid_left, grid_right = st.columns(2)
+    
+    # --- LEFT COLUMN CONTENT ---
+    with grid_left:
+        # BOX 1: EXTRACTED FEATURES
         render_features_panel(active_res)
         
-    # --- RIGHT COLUMN: Decision Trace ---
-    with col_right:
-        # 1. Visual Trace
-        render_trace_panel(active_trace)
-        
-        # 2. Scrollable JSON Trace
-        # HEADER
-        st.markdown("""
-        <div class="panel-header" style="margin-top: 2rem;">
-            <span class="panel-icon">📜</span> RAW TRACE DATA
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # SCROLLABLE CONTENT BLOCK
-        json_html = '<div style="height: 400px; overflow-y: auto; padding: 1rem; background-color: #0d1117;">'
-        
-        # Build list items
+        # BOX 2: RAW TRACE DATA
+        # Manual Box Construction
+        json_html = '<div class="content-box">'
+        json_html += '<div class="panel-header content-box-header"><span class="panel-icon">📜</span> RAW TRACE DATA</div>'
+        json_html += '<div style="height: 300px; overflow-y: auto; padding-right: 10px;">'
         for k, v in active_trace.items():
             disp_val = v
             if isinstance(v, (dict, list)):
                 sanitized_val = str(v).replace("<", "&lt;").replace(">", "&gt;")
                 disp_val = f"<span style='opacity:0.6; font-size:0.85em;'>{sanitized_val}</span>"
-            
-            # Single line string construction
             json_html += f'<div class="feature-item"><span class="feature-key">{k}</span><span class="feature-val">{disp_val}</span></div>'
-            
-        json_html += "</div>"
+        json_html += "</div></div>" # Close list and box
         st.markdown(json_html, unsafe_allow_html=True)
+
+    # --- RIGHT COLUMN CONTENT ---
+    with grid_right:
+        # BOX 3: LLM
+        render_llm_panel(active_trace)
         
-    # 5. FOOTER
+        # BOX 4: DECISION TRACE
+        render_trace_panel(active_trace)
+        
+    # FOOTER
     st.markdown("""
     <div class="footer-bar">
-        <div>ENGINE ID: TR-0922-PROD | LAST SYNC: 0.2MS AGO</div>
-        <div style="color: #3fb950; display: flex; align-items: center;">
-            <span class="status-dot"></span> ENGINE ONLINE
-        </div>
+        <div>IOT-TRACE ENGINE v1.0.4</div>
+        <div>STATUS: ONLINE • LAST UPDATE: NOW</div>
     </div>
     """, unsafe_allow_html=True)
 
