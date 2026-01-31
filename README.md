@@ -35,22 +35,18 @@ graph TD
     E{"Decision Engine"}
     style E fill:#fdd,stroke:#333,stroke-width:2px
     
-    F["Groq API<br>(Llama-3.3-70b)"]
-    style F fill:#eef,stroke:#333,stroke-width:2px
+    F["Fallback Logic<br>(Simulated)"]
+    style F fill:#eee,stroke:#333,stroke-width:2px
     
-    G["Fallback Logic<br>(Simulated)"]
-    style G fill:#eee,stroke:#333,stroke-width:2px
-    
-    H[("Final Output<br>(final_recommendation.json)")]
-    style H fill:#9f9,stroke:#333,stroke-width:2px
+    G[("Final Output<br>(final_recommendation.json)")]
+    style G fill:#9f9,stroke:#333,stroke-width:2px
 
     %% Edges
     A -->|1. Load Alert Data| B
     B -->|2. Extract Decision & Behavior| C
     C -->|3. API Call| D
     D -->|4. Return Context/Manuals| B
-    B -->|5. Combine Alert + Context| E
-    E -->|If GROQ_API_KEY exists| F
+    B -->|5. Combine Alert + Context| 
     E -->|If No Key| G
     F -->|6. Generate Natural Language| H
     G -->|6. Generate Structured JSON| H
